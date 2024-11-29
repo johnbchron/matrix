@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{EvalContext, Signal, SignalDef, SignalMatrix};
 
+/// A planned evaluation of targets in a [`SignalMatrix`].
 #[derive(Debug)]
 pub struct PlannedEvaluation<'m, T: SignalDef> {
   matrix:       &'m SignalMatrix<T>,
@@ -10,6 +11,8 @@ pub struct PlannedEvaluation<'m, T: SignalDef> {
 }
 
 impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
+  /// Create a new planned evaluation of the given root targets in the given
+  /// [`SignalMatrix`].
   pub fn new(
     matrix: &'m SignalMatrix<T>,
     root_targets: HashSet<Signal>,
@@ -62,6 +65,7 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
     }
   }
 
+  /// Get all targets that are queued for evaluation in this planned evaluation.
   pub fn all_queued_targets(&self) -> HashSet<Signal> {
     self
       .passes
@@ -71,6 +75,7 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
       .collect()
   }
 
+  /// Run the planned evaluation, updating the given value map with the results.
   pub fn run(&self, values: &mut EvaluationValueMap<T>) {
     for (i, pass) in self.passes.iter().enumerate() {
       for target in pass.targets.iter() {
@@ -102,23 +107,27 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
   }
 }
 
+/// Describes a pass in a planned evaluation.
 #[derive(Debug)]
 pub struct EvaluationPassDescriptor {
   targets: HashSet<Signal>,
 }
 
+/// A map of values for evaluated signals.
 #[derive(Debug)]
 pub struct EvaluationValueMap<T: SignalDef> {
   values: HashMap<Signal, Option<T::Value>>,
 }
 
 impl<T: SignalDef> EvaluationValueMap<T> {
+  /// Create a new empty value map for the given targets.
   pub fn new_empty(targets: HashSet<Signal>) -> Self {
     EvaluationValueMap {
       values: targets.iter().map(|s| (*s, None)).collect(),
     }
   }
 
+  /// Get the value for the given signal, if it has been evaluated.
   pub fn get(&self, signal: Signal) -> Option<&T::Value> {
     self.values.get(&signal).and_then(|v| v.as_ref())
   }

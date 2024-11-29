@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::{Evaluator, Signal, SignalDef};
 
+/// A signal definition for a floating-point value or operation.
 #[derive(Debug)]
 pub enum FloatMapSignalDef {
   Constant(f64),
@@ -9,6 +10,7 @@ pub enum FloatMapSignalDef {
   BinaryOp(FloatBinaryOp),
 }
 
+/// A binary operation on floating-point signals.
 #[derive(Debug)]
 pub enum FloatBinaryOp {
   Add(Signal, Signal),
@@ -18,6 +20,7 @@ pub enum FloatBinaryOp {
   Pow(Signal, Signal),
 }
 
+/// A unary operation on a floating-point signal.
 #[derive(Debug)]
 pub enum UnaryOp {
   Neg(Signal),
