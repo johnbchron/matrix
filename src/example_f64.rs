@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{Evaluator, Signal, SignalDef};
+use crate::{EvalContext, Signal, SignalDef};
 
 /// A signal definition for a floating-point value or operation.
 #[derive(Debug)]
@@ -45,8 +45,8 @@ impl SignalDef for FloatMapSignalDef {
     }
   }
 
-  fn evaluator() -> Evaluator<Self, Self::Value> {
-    |ctx, def| match def {
+  fn evaluate(&self, ctx: &EvalContext<Self>) -> Self::Value {
+    match self {
       FloatMapSignalDef::Constant(value) => *value,
       FloatMapSignalDef::UnaryOp(op) => match op {
         UnaryOp::Neg(s) => -ctx.values[s],

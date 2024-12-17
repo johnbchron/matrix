@@ -5,22 +5,20 @@ use tracing::instrument;
 
 use crate::{EvalContext, Signal, SignalDef, SignalMatrix};
 
-/// A planned evaluation of targets in a [`SignalMatrix`].
-#[derive(Debug)]
-pub struct PlannedEvaluation<'m, T: SignalDef> {
-  matrix:       &'m SignalMatrix<T>,
-  root_targets: HashSet<Signal>,
-  passes:       Vec<EvaluationPassDescriptor>,
+pub trait EvaluationPlanner {
+  fn plan_evaluation<Def: SignalDef>(
+    matrix: &SignalMatrix<Def>,
+    root_targets: HashSet<Signal>,
+  ) -> PlannedEvaluation<'_, Def>;
 }
 
-impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
-  /// Create a new planned evaluation of the given root targets in the given
-  /// [`SignalMatrix`].
-  #[instrument]
-  pub fn new(
-    matrix: &'m SignalMatrix<T>,
+pub struct CustomPlanner;
+
+impl EvaluationPlanner for CustomPlanner {
+  fn plan_evaluation<Def: SignalDef>(
+    matrix: &SignalMatrix<Def>,
     root_targets: HashSet<Signal>,
-  ) -> Self {
+  ) -> PlannedEvaluation<'_, Def> {
     let dep_registry = matrix.defset.dependency_registry();
 
     let mut passes = vec![];
@@ -77,6 +75,26 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
       passes,
     }
   }
+}
+
+/// A planned evaluation of targets in a [`SignalMatrix`].
+#[derive(Debug)]
+pub struct PlannedEvaluation<'m, T: SignalDef> {
+  matrix:       &'m SignalMatrix<T>,
+  root_targets: HashSet<Signal>,
+  passes:       Vec<EvaluationPassDescriptor>,
+}
+
+impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
+  /// Create a new planned evaluation of the given root targets in the given
+  /// [`SignalMatrix`].
+  #[instrument]
+  pub fn new<P: EvaluationPlanner>(
+    matrix: &'m SignalMatrix<T>,
+    root_targets: HashSet<Signal>,
+  ) -> Self {
+    P::plan_evaluation(matrix, root_targets)
+  }
 
   /// Get all targets that are queued for evaluation in this planned evaluation.
   pub fn all_queued_targets(&self) -> HashSet<Signal> {
@@ -94,8 +112,6 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
     &self,
     mut values: EvaluationValueMap<T>,
   ) -> EvaluationValueMap<T> {
-    let evaluator = T::evaluator();
-
     for (i, pass) in self.passes.iter().enumerate() {
       let pass_span = tracing::info_span!("evaluation_pass", i);
       let _enter = pass_span.enter();
@@ -129,7 +145,7 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
 
           let evaluator_span = tracing::info_span!("evaluate");
           let _enter = evaluator_span.enter();
-          let value = evaluator(&context, def);
+          let value = def.evaluate(&context);
           drop(_enter);
 
           (*target, value)

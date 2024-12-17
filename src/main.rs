@@ -1,9 +1,9 @@
 use matrix::{
-  EvaluationValueMap, FloatBinaryOp, FloatMapSignalDef, Signal, SignalDefMap,
-  SignalMatrix, UnaryOp,
+  CustomPlanner, EvaluationValueMap, FloatBinaryOp, FloatMapSignalDef,
+  SignalDefMap, SignalMatrix,
 };
 use tracing_chrome::ChromeLayerBuilder;
-use tracing_subscriber::{prelude::*, registry::Registry};
+use tracing_subscriber::prelude::*;
 
 fn main() {
   let (chrome_layer, _guard) = ChromeLayerBuilder::new().build();
@@ -40,7 +40,7 @@ fn main() {
   let matrix = SignalMatrix::new(defset);
 
   let now = std::time::Instant::now();
-  let planned_eval = matrix.plan_evaluation(root_targets);
+  let planned_eval = matrix.plan_evaluation::<CustomPlanner>(root_targets);
   println!("planning took {:?}", now.elapsed());
 
   println!(

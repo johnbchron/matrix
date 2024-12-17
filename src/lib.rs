@@ -55,11 +55,11 @@ impl<T: SignalDef> SignalMatrix<T> {
   pub fn new(defset: SignalDefMap<T>) -> Self { SignalMatrix { defset } }
 
   /// Build a [`PlannedEvaluation`] of the given root targets.
-  pub fn plan_evaluation(
+  pub fn plan_evaluation<P: EvaluationPlanner>(
     &self,
     root_targets: HashSet<Signal>,
   ) -> PlannedEvaluation<T> {
-    PlannedEvaluation::new(self, root_targets)
+    PlannedEvaluation::new::<P>(self, root_targets)
   }
 }
 
@@ -72,9 +72,6 @@ pub struct EvalContext<'c, T: SignalDef> {
   values: HashMap<Signal, &'c T::Value>,
 }
 
-/// A function that evaluates a signal definition given a context.
-pub type Evaluator<T, V> = fn(&EvalContext<T>, &T) -> V;
-
 /// Trait for signal definitions.
 pub trait SignalDef: Debug + Sync + Sized {
   /// The type of value that this signal definition evaluates to.
@@ -82,6 +79,6 @@ pub trait SignalDef: Debug + Sync + Sized {
 
   /// Get the dependencies of this signal definition.
   fn dependencies(&self) -> HashSet<Signal>;
-  /// Get the evaluator function for this signal definition.
-  fn evaluator() -> Evaluator<Self, Self::Value>;
+  /// Evaluate this signal definition with the given context.
+  fn evaluate(&self, ctx: &EvalContext<Self>) -> Self::Value;
 }
