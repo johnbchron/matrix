@@ -8,6 +8,7 @@ use std::{
 
 pub use eval::*;
 pub use example_f64::*;
+use tracing::instrument;
 
 /// A map of signal definitions.
 #[derive(Debug, Default)]
@@ -33,6 +34,7 @@ impl<T: SignalDef> SignalDefMap<T> {
 
   pub fn get(&self, signal: Signal) -> Option<&T> { self.map.get(&signal) }
 
+  #[instrument]
   fn dependency_registry(&self) -> HashMap<Signal, HashSet<Signal>> {
     self
       .map
@@ -74,9 +76,9 @@ pub struct EvalContext<'c, T: SignalDef> {
 pub type Evaluator<T, V> = fn(&EvalContext<T>, &T) -> V;
 
 /// Trait for signal definitions.
-pub trait SignalDef: Debug + Sized {
+pub trait SignalDef: Debug + Sync + Sized {
   /// The type of value that this signal definition evaluates to.
-  type Value: Sized;
+  type Value: Debug + Send + Sync + Sized;
 
   /// Get the dependencies of this signal definition.
   fn dependencies(&self) -> HashSet<Signal>;

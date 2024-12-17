@@ -1,5 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use rayon::prelude::*;
+use tracing::instrument;
+
 use crate::{EvalContext, Signal, SignalDef, SignalMatrix};
 
 /// A planned evaluation of targets in a [`SignalMatrix`].
@@ -13,6 +16,7 @@ pub struct PlannedEvaluation<'m, T: SignalDef> {
 impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
   /// Create a new planned evaluation of the given root targets in the given
   /// [`SignalMatrix`].
+  #[instrument]
   pub fn new(
     matrix: &'m SignalMatrix<T>,
     root_targets: HashSet<Signal>,
@@ -24,15 +28,20 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
     let mut unsatisfied_targets = root_targets.clone();
 
     loop {
+      let loop_span =
+        tracing::info_span!("planning_pass", ?unsatisfied_targets);
+      let _enter = loop_span.enter();
       let pass = EvaluationPassDescriptor {
         targets: unsatisfied_targets.clone(),
       };
 
-      unsatisfied_targets = unsatisfied_targets
-        .iter()
-        .flat_map(|target| dep_registry.get(target).unwrap())
-        .cloned()
-        .collect();
+      tracing::info_span!("unsatisfied_target_deps").in_scope(|| {
+        unsatisfied_targets = unsatisfied_targets
+          .iter()
+          .flat_map(|target| dep_registry.get(target).unwrap())
+          .cloned()
+          .collect();
+      });
 
       if pass.targets.is_empty() {
         break;
@@ -41,22 +50,26 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
       passes.push(pass);
     }
 
-    passes.reverse();
+    tracing::info_span!("reverse_passes").in_scope(|| {
+      passes.reverse();
+    });
 
     // now go through passes start to finish and remove targets from later
     // passes if they are satisfied by an earlier pass
 
-    let mut queued_targets: HashSet<Signal> = HashSet::new();
-    for pass in passes.iter_mut() {
-      pass.targets.retain(|target| {
-        if queued_targets.contains(target) {
-          false
-        } else {
-          queued_targets.insert(*target);
-          true
-        }
-      });
-    }
+    tracing::info_span!("dedup_passes").in_scope(|| {
+      let mut queued_targets: HashSet<Signal> = HashSet::new();
+      for pass in passes.iter_mut() {
+        pass.targets.retain(|target| {
+          if queued_targets.contains(target) {
+            false
+          } else {
+            queued_targets.insert(*target);
+            true
+          }
+        });
+      }
+    });
 
     PlannedEvaluation {
       matrix,
@@ -69,48 +82,80 @@ impl<'m, T: SignalDef> PlannedEvaluation<'m, T> {
   pub fn all_queued_targets(&self) -> HashSet<Signal> {
     self
       .passes
-      .iter()
-      .flat_map(|pass| pass.targets.iter())
-      .cloned()
+      .par_iter()
+      .flat_map(|pass| pass.targets.par_iter())
+      .copied()
       .collect()
   }
 
   /// Run the planned evaluation, updating the given value map with the results.
-  pub fn run(&self, values: &mut EvaluationValueMap<T>) {
+  #[instrument]
+  pub fn run(
+    &self,
+    mut values: EvaluationValueMap<T>,
+  ) -> EvaluationValueMap<T> {
+    let evaluator = T::evaluator();
+
     for (i, pass) in self.passes.iter().enumerate() {
-      for target in pass.targets.iter() {
-        let def = self.matrix.defset.get(*target).unwrap();
-        let deps = def.dependencies();
+      let pass_span = tracing::info_span!("evaluation_pass", i);
+      let _enter = pass_span.enter();
+      let evaluations: Vec<_> = pass
+        .targets
+        .par_iter()
+        .map(|target| {
+          let def = self.matrix.defset.get(*target).unwrap();
+          let deps = def.dependencies();
 
-        let context_values = deps.iter().map(|dep| {
-          let value = values
-            .values
-            .get(dep)
-            .and_then(|v| v.as_ref())
-            .unwrap_or_else(|| {
-              panic!(
-                "Missing value for dependency {dep:?} while evaluating \
-                 {target:?} in pass {i}"
-              )
-            });
-          (*dep, value)
-        });
-        let context = EvalContext {
-          values: context_values.collect(),
-        };
+          let context_gathering_span =
+            tracing::info_span!("gather_context", ?deps);
+          let _enter = context_gathering_span.enter();
+          let context_values = deps.into_iter().map(|dep| {
+            let value = values
+              .values
+              .get(&dep)
+              .and_then(|v| v.as_ref())
+              .unwrap_or_else(|| {
+                panic!(
+                  "Missing value for dependency {dep:?} while evaluating \
+                   {target:?} in pass {i}"
+                )
+              });
+            (dep, value)
+          });
+          let context = EvalContext {
+            values: context_values.collect(),
+          };
+          drop(_enter);
 
-        let value = T::evaluator()(&context, def);
+          let evaluator_span = tracing::info_span!("evaluate");
+          let _enter = evaluator_span.enter();
+          let value = evaluator(&context, def);
+          drop(_enter);
 
-        values.values.insert(*target, Some(value));
+          (*target, value)
+        })
+        .collect();
+
+      for (target, value) in evaluations {
+        values.values.insert(target, Some(value));
       }
     }
+
+    values
   }
+
+  pub fn passes(&self) -> &[EvaluationPassDescriptor] { &self.passes }
 }
 
 /// Describes a pass in a planned evaluation.
 #[derive(Debug)]
 pub struct EvaluationPassDescriptor {
   targets: HashSet<Signal>,
+}
+
+impl EvaluationPassDescriptor {
+  /// Get the targets in this pass.
+  pub fn targets(&self) -> &HashSet<Signal> { &self.targets }
 }
 
 /// A map of values for evaluated signals.
@@ -123,7 +168,7 @@ impl<T: SignalDef> EvaluationValueMap<T> {
   /// Create a new empty value map for the given targets.
   pub fn new_empty(targets: HashSet<Signal>) -> Self {
     EvaluationValueMap {
-      values: targets.iter().map(|s| (*s, None)).collect(),
+      values: targets.par_iter().map(|s| (*s, None)).collect(),
     }
   }
 
