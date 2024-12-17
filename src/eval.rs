@@ -193,3 +193,51 @@ impl<T: SignalDef> EvaluationValueMap<T> {
     self.values.get(&signal).and_then(|v| v.as_ref())
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{FloatBinaryOp, FloatMapSignalDef, SignalDefMap, UnaryOp};
+
+  #[test]
+  fn test_planned_evaluation() {
+    let mut defset = SignalDefMap::new();
+
+    let a = defset.insert(FloatMapSignalDef::Constant(1.0));
+    let b = defset.insert(FloatMapSignalDef::Constant(2.0));
+    let c =
+      defset.insert(FloatMapSignalDef::BinaryOp(FloatBinaryOp::Add(a, b)));
+    let d = defset.insert(FloatMapSignalDef::UnaryOp(UnaryOp::Neg(c)));
+    let e =
+      defset.insert(FloatMapSignalDef::BinaryOp(FloatBinaryOp::Mul(c, d)));
+
+    let root_targets = vec![e].into_iter().collect();
+    let matrix = SignalMatrix::new(defset);
+
+    let planned_eval = matrix.plan_evaluation::<CustomPlanner>(root_targets);
+
+    // phase 0: a, b
+    // phase 1: c
+    // phase 2: d
+    // phase 3: e
+    assert_eq!(planned_eval.passes().len(), 4);
+    assert!(planned_eval.passes()[0]
+      .targets()
+      .eq(&[a, b].iter().cloned().collect()));
+    assert!(planned_eval.passes()[1]
+      .targets()
+      .eq(&[c].iter().cloned().collect()));
+    assert!(planned_eval.passes()[2]
+      .targets()
+      .eq(&[d].iter().cloned().collect()));
+    assert!(planned_eval.passes()[3]
+      .targets()
+      .eq(&[e].iter().cloned().collect()));
+
+    let values =
+      EvaluationValueMap::new_empty(planned_eval.all_queued_targets());
+    let values = planned_eval.run(values);
+
+    assert_eq!(values.get(e).unwrap(), &-9.0);
+  }
+}
